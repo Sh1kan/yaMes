@@ -1,16 +1,12 @@
-const { app, BrowserWindow, shell, Tray, Menu, Notification } = require("electron")
+const { app, BrowserWindow, shell, Tray, Menu, Notification, ipcMain, session } = require("electron")
 const path = require("path")
-const { ipcMain } = require("electron")
+
 let win
 let tray
-
-ipcMain.on("new-message", (event, data) => {
-
-  const { title, body } = data
-
-  showNotification(title, body)
-
-})
+let unreadCount = 0
+const iconNormal = path.join(__dirname, "icon.png")
+const iconUnread = path.join(__dirname, "icon-unread.jpg")
+app.commandLine.appendSwitch("disable-features", "BlockInsecurePrivateNetworkRequests")
 
 function createWindow() {
 
@@ -28,8 +24,7 @@ function createWindow() {
   })
 
   win.loadURL("https://messenger.360.yandex.ru")
-
-  // перехват window.open
+win.webContents.openDevTools()
   win.webContents.setWindowOpenHandler(({ url }) => {
 
     if (url.includes("yandex")) {
@@ -41,7 +36,6 @@ function createWindow() {
     return { action: "deny" }
   })
 
-  // скрываем вместо закрытия
   win.on("close", (event) => {
 
     if (!app.isQuiting) {
@@ -50,35 +44,36 @@ function createWindow() {
     }
 
   })
+}
 
-  win.webContents.on("page-title-updated", (event, title) => {
+function updateTray() {
 
-  const match = title.match(/\((\d+)\)/)
+  if (!tray) return
 
-  if (match) {
+  if (unreadCount > 0) {
 
-    const count = parseInt(match[1])
-
-    tray.setTitle(` ${count}`)
+    tray.setImage(iconUnread)
+    tray.setTitle(` ${unreadCount}`)
 
   } else {
 
+    tray.setImage(iconNormal)
     tray.setTitle("")
 
   }
-
-})
 
 }
 
 function createTray() {
 
-  tray = new Tray(path.join(__dirname, "icon.png"))
+  tray = new Tray(iconNormal)
 
   const contextMenu = Menu.buildFromTemplate([
     {
       label: "Открыть",
       click: () => {
+        unreadCount = 0
+        updateTray()
         win.show()
       }
     },
@@ -92,38 +87,79 @@ function createTray() {
   ])
 
   tray.setToolTip("Yandex Messenger")
-
   tray.setContextMenu(contextMenu)
 
   tray.on("click", () => {
-    win.isVisible() ? win.hide() : win.show()
+
+    if (win.isVisible()) {
+      win.hide()
+    } else {
+      unreadCount = 0
+      updateTray()
+      win.show()
+    }
+
   })
 }
 
-function showNotification(title, body) {
+function showNotification(author, text) {
 
-  new Notification({
-    title,
-    body,
+  const notification = new Notification({
+    title: author || "Новое сообщение",
+    body: text,
     icon: path.join(__dirname, "icon.png")
-  }).show()
+  })
 
+  notification.show()
+
+  notification.on("click", () => {
+    unreadCount = 0
+    updateTray()
+    win.show()
+  })
 }
+
+ipcMain.on("new-message", (event, data) => {
+
+  const { author, text } = data
+
+  if (!text) return
+
+  unreadCount++
+
+  updateTray()
+
+  const notification = new Notification({
+    title: author || "Новое сообщение",
+    body: text,
+    icon: path.join(__dirname, "icon.png")
+  })
+
+  notification.show()
+
+})
+
+ipcMain.on("update-unread", (event, count) => {
+
+  unreadCount = count
+  updateTray()
+
+})
 
 app.whenReady().then(() => {
 
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+
+    if (permission === "notifications") {
+      callback(true)
+    } else {
+      callback(false)
+    }
+
+  })
+
   createWindow()
   createTray()
-
-  // тестовое уведомление
-  setTimeout(() => {
-
-    showNotification(
-      "Yandex Messenger",
-      "Приложение запущено"
-    )
-
-  }, 3000)
 
 })
 

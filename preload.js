@@ -1,27 +1,46 @@
-const { contextBridge, ipcRenderer } = require("electron")
+const { ipcRenderer } = require("electron")
+
+let lastUnread = 0
+
+function getUnreadFromTitle() {
+
+  const title = document.title
+
+  const match = title.match(/(\d+)/)
+
+  if (!match) return 0
+
+  return parseInt(match[1])
+
+}
 
 window.addEventListener("DOMContentLoaded", () => {
 
   const observer = new MutationObserver(() => {
 
-    const messages = document.querySelectorAll("[data-message-id]")
+    const unread = getUnreadFromTitle()
 
-    const last = messages[messages.length - 1]
+    if (unread === lastUnread) return
 
-    if (!last) return
+    ipcRenderer.send("update-unread", unread)
 
-    const text = last.innerText
+    if (unread > lastUnread) {
 
-    ipcRenderer.send("new-message", {
-      title: "Новое сообщение",
-      body: text
-    })
+      ipcRenderer.send("new-message", {
+        author: "Новое сообщение",
+        text: `Новых сообщений: ${unread - lastUnread}`
+      })
+
+    }
+
+    lastUnread = unread
 
   })
 
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
+  const titleElement = document.querySelector("title")
+
+  observer.observe(titleElement, {
+    childList: true
   })
 
 })
